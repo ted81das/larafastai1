@@ -1,4 +1,6 @@
-<?phpnamespace App\Providers;
+<?php
+
+namespace App\Providers;
 
 use App\Services\LLM\OpenAIAdapter;
 use App\Services\LLM\PrismAdapter;
