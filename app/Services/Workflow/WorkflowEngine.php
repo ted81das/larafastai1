@@ -18,6 +18,10 @@ class WorkflowEngine
     protected array $executionHistory = [];
     protected ?WorkflowExecution $executionRecord = null;
 
+
+
+
+
     /**
      * Create a new workflow engine instance.
      *
@@ -76,6 +80,23 @@ class WorkflowEngine
      */
     public function executeNode(WorkflowNode $node): mixed
     {
+        
+        
+        $config = $this->resolveConfig($node->config);
+        
+        if ($node->type === 'agent') {
+            $agent = AgentDynamicConfig::findOrFail($config['agent_id']);
+            
+            // Override API key if provided in node config
+            if (!empty($config['apiKey'])) {
+                $agent->api_key = $config['apiKey'];
+            }
+            
+            return $agent->executeCompletion($messages, [
+                'model_settings' => $config['modelSettings'] ?? null,
+            ]);
+        }
+        
         // Get the node implementation
         $nodeType = $this->nodeRegistry->getNodeType($node->type);
         

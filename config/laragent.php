@@ -14,5 +14,16 @@ return [
             'default_max_completion_tokens' => 100,
             'default_temperature' => 1,
         ],
+
+        'prism' => [
+            'name' => 'prism',
+            'driver' => \App\Services\LLM\PrismDriver::class,
+            'url' => env('PRISM_SERVER_URL'),
+            'models' => [
+                'deepseek' => ['name' => 'Deepseek', 'context_window' => 8192],
+                'ollama' => ['name' => 'Ollama', 'context_window' => 4096],
+                'anthropic' => ['name' => 'Claude', 'context_window' => 100000],
+            ]
+        ],
     ],
 ];

@@ -3,11 +3,265 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use LarAgent\Agent;
 use LarAgent\Message;
 use LarAgent\Tool;
 use Illuminate\Support\Facades\Log;
+
+class AgentDynamicConfig extends Model
+{
+    use HasFactory;
+
+    // Keep your Eloquent model functionality
+    protected $fillable = [
+        'name',
+        'description',
+        'user_id',
+        'team_id',
+        'instruction',
+        'model',
+        'temperature',
+        'tools',
+        'rag_enabled',
+        'rag_config',
+        'metadata',
+        'response_schema',
+        'provider', //added for prism provider
+        'api_key', //added for prism compatibility 
+        'provider_settings'
+    ];
+
+    protected $casts = [
+        'tools' => 'array',
+        'rag_config' => 'array',
+        'metadata' => 'array',
+        'rag_enabled' => 'boolean',
+        'temperature' => 'float',
+        'response_schema' => 'array',
+         'provider_settings' => 'array',
+    ];
+    
+    // Internal LarAgent instance
+    protected ?Agent $agentInstance = null;
+    
+    /**
+     * Get or create the internal LarAgent instance
+     */
+    protected function getAgent(): Agent
+    {
+        if (!$this->agentInstance) {
+            $sessionKey = "agent_{$this->id}";
+            $this->agentInstance = Agent::for($sessionKey);
+            
+            // Configure the agent with our properties
+            if ($this->instruction) {
+                $this->agentInstance->withInstructions($this->instruction);
+            }
+            
+            if ($this->model) {
+                $this->agentInstance->setModel($this->model);
+            }
+            
+            if ($this->temperature) {
+                $this->agentInstance->temperature($this->temperature);
+            }
+            
+            if ($this->response_schema) {
+                $this->agentInstance->structured($this->response_schema);
+            }
+            
+            // Register tools
+            $this->registerLarAgentTools();
+        }
+        
+        return $this->agentInstance;
+    }
+    
+    /**
+     * Register tools with LarAgent
+     */
+    protected function registerLarAgentTools(): void
+    {
+        if (!$this->agentInstance || empty($this->tools)) {
+            return;
+        }
+        
+        // Get tools configuration
+        $tools = $this->getToolsConfig();
+        
+        // Register each tool with LarAgent
+        foreach ($tools as $toolConfig) {
+            if ($toolConfig instanceof Tool) {
+                $this->agentInstance->withTool($toolConfig);
+            } elseif (is_array($toolConfig) && isset($toolConfig['type']) && $toolConfig['type'] === 'function') {
+                // Convert array config to Tool instance
+                $functionConfig = $toolConfig['function'] ?? [];
+                $tool = Tool::create(
+                    $functionConfig['name'] ?? 'unnamed_tool',
+                    $functionConfig['description'] ?? ''
+                );
+                
+                // Add parameters
+                if (isset($functionConfig['parameters']['properties'])) {
+                    foreach ($functionConfig['parameters']['properties'] as $name => $prop) {
+                        $tool->addProperty(
+                            $name,
+                            $prop['type'] ?? 'string',
+                            $prop['description'] ?? '',
+                            $prop['enum'] ?? []
+                        );
+                        
+                        // Set as required if needed
+                        if (isset($functionConfig['parameters']['required']) && 
+                            in_array($name, $functionConfig['parameters']['required'])) {
+                            $tool->setRequired($name);
+                        }
+                    }
+                }
+                
+                // Set callback based on tool name
+                $tool->setCallback([$this, 'handleToolCall']);
+                
+                $this->agentInstance->withTool($tool);
+            }
+        }
+    }
+    
+    // [Keep all your existing getToolsConfig(), handleRetrieval(), etc. methods]
+    
+    /**
+     * Send a message to the agent and get its response
+     */
+    public function message($userMessage)
+    {
+        return $this->getAgent()->message($userMessage);
+    }
+    
+    /**
+     * Execute chat completion with dynamic config
+     */
+    public function executeCompletion(array $messages, array $options = [])
+    {
+        try {
+            // Get the last message as the current prompt
+            $lastMessage = end($messages);
+            $userMessage = $lastMessage['content'] ?? '';
+            
+            $agent = $this->getAgent();
+            
+            // Apply temperature if provided
+            if (isset($options['temperature'])) {
+                $agent->temperature($options['temperature']);
+            }
+            
+            // Apply model if provided
+            if (isset($options['model'])) {
+                $agent->setModel($options['model']);
+            }
+            
+            // Create the message
+            $message = Message::user($userMessage);
+            
+            // If there are images in the message
+            if (isset($lastMessage['images']) && is_array($lastMessage['images'])) {
+                foreach ($lastMessage['images'] as $imageUrl) {
+                    $message = $message->withImage($imageUrl);
+                }
+            }
+            
+            // Execute the LarAgent respond method
+            $response = $agent->withMessage($message)->respond();
+            
+            // Format the response to match your expected format
+            return [
+                'success' => true,
+                'content' => is_string($response) ? $response : json_encode($response),
+                'data' => [
+                    'choices' => [
+                        [
+                            'message' => [
+                                'content' => is_string($response) ? $response : json_encode($response),
+                                'role' => 'assistant'
+                            ]
+                        ]
+                    ]
+                ]
+            ];
+        } catch (\Exception $e) {
+            Log::error('Error in executeCompletion', [
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return [
+                'success' => false,
+                'error' => $e->getMessage()
+            ];
+        }
+    }
+    
+    /**
+     * Relationship to user
+     */
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    /**
+     * Relationship to team
+     */
+    public function team(): BelongsTo
+    {
+        return $this->belongsTo(Team::class);
+    }
+    
+    /**
+     * Create a new agent instance for a specific user
+     */
+    public static function forUser(User $user, array $config = []): self
+    {
+        $config['user_id'] = $user->id;
+        return self::create($config);
+    }
+
+//for prism clients and models
+    public function getModelClient()
+    {
+        if ($this->provider === 'prism') {
+            return new PrismAdapter([
+                'api_key' => $this->api_key ?? config('services.prism.api_key'),
+                'url' => config('services.prism.url'),
+                'settings' => $this->provider_settings
+            ]);
+        }
+        
+        return parent::getModelClient();
+    }
+
+    /**
+     * Create a new agent instance for a specific team
+     */
+    public static function forTeam(Team $team, array $config = []): self
+    {
+        $config['team_id'] = $team->id;
+        return self::create($config);
+    }
+}
+
+
+/*
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use LarAgent\Agent;
+use LarAgent\Message;
+use LarAgent\Tool;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Contracts\Auth\Authenticatable;
 
 class AgentDynamicConfig extends Agent
 {
@@ -42,9 +296,9 @@ class AgentDynamicConfig extends Agent
         'response_schema' => 'array',
     ];
 
-    /**
-     * Constructor that initializes both Eloquent and LarAgent
-     */
+    
+    // Constructor that initializes both Eloquent and LarAgent
+     
     public function __construct(array $attributes = [])
     {
         // Generate a unique session key for this agent
@@ -81,9 +335,9 @@ class AgentDynamicConfig extends Agent
         }
     }
 
-    /**
-     * Override instructions method for LarAgent
-     */
+    
+    // Override instructions method for LarAgent
+     
     public function instructions()
     {
         return $this->instruction ?? '';
@@ -91,7 +345,7 @@ class AgentDynamicConfig extends Agent
 
     /**
      * Override structuredOutput method for LarAgent
-     */
+     
     public function structuredOutput()
     {
         return $this->responseSchema ?? null;
@@ -99,7 +353,7 @@ class AgentDynamicConfig extends Agent
 
     /**
      * Relationship to user
-     */
+     
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
@@ -107,7 +361,7 @@ class AgentDynamicConfig extends Agent
 
     /**
      * Relationship to team
-     */
+     
     public function team(): BelongsTo
     {
         return $this->belongsTo(Team::class);
@@ -115,7 +369,7 @@ class AgentDynamicConfig extends Agent
 
     /**
      * Register tools with LarAgent
-     */
+     
     protected function registerLarAgentTools(): void
     {
         // Get tools configuration
@@ -161,7 +415,7 @@ class AgentDynamicConfig extends Agent
 
     /**
      * Get tools configuration
-     */
+   
     public function getToolsConfig(): array
     {
         $toolsConfig = [];
@@ -195,7 +449,7 @@ class AgentDynamicConfig extends Agent
 
     /**
      * Handle RAG retrieval tool calls
-     */
+     
     public function handleRetrieval($args)
     {
         try {
@@ -244,7 +498,7 @@ class AgentDynamicConfig extends Agent
 
     /**
      * Generic handler for tool calls
-     */
+     
     public function handleToolCall($args)
     {
         // Implement appropriate logic based on tool name
@@ -270,7 +524,7 @@ class AgentDynamicConfig extends Agent
     /**
      * Execute chat completion with dynamic config
      * This preserves your existing API while using LarAgent under the hood
-     */
+     
     public function executeCompletion(array $messages, array $options = [])
     {
         try {
@@ -346,7 +600,7 @@ class AgentDynamicConfig extends Agent
 
     /**
      * Handle streaming responses (placeholder)
-     */
+     
     protected function handleStreamingResponse(array $options)
     {
         // This is a placeholder for streaming implementation
@@ -361,7 +615,7 @@ class AgentDynamicConfig extends Agent
 
     /**
      * Get model client based on model type (placeholder)
-     */
+     
     protected function getModelClient()
     {
         // This is a placeholder that would be replaced with actual implementation
@@ -369,19 +623,32 @@ class AgentDynamicConfig extends Agent
         return null;
     }
 
+
+  /**
+ * Create a new agent instance for a specific user
+ * This preserves the existing factory pattern while using LarAgent
+ 
+public static function forUser(\Illuminate\Contracts\Auth\Authenticatable $user): static
+{
+    return new static([
+        'user_id' => $user->getAuthIdentifier()
+    ]);
+}
+
+
     /**
-     * Create a new agent instance for a specific user
-     * This preserves the existing factory pattern while using LarAgent
-     */
-    public static function forUser(User $user, array $config = []): self
-    {
-        $config['user_id'] = $user->id;
-        return new static($config);
-    }
+ * Create a new agent instance for a specific user with additional configuration
+ 
+public static function forUserWithConfig(\Illuminate\Contracts\Auth\Authenticatable $user, array $config = []): static
+{
+    $config['user_id'] = $user->getAuthIdentifier();
+    return new static($config);
+}
+
 
     /**
      * Create a new agent instance for a specific team
-     */
+    /
     public static function forTeam(Team $team, array $config = []): self
     {
         $config['team_id'] = $team->id;
@@ -390,7 +657,7 @@ class AgentDynamicConfig extends Agent
 
     /**
      * Create a new agent instance with specific configuration
-     */
+    /
     public static function withConfig(array $config): self
     {
         return new static($config);

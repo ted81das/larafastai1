@@ -126,6 +126,23 @@
           </div>
         </div>
       </div>
+      <div v-if="selectedAgent?.provider === 'prism'">
+      <label>API Key (Optional)</label>
+      <input 
+        v-model="localConfig.apiKey"
+        placeholder="Override default Prism API Key"
+        @change="updateConfig"
+      />
+      
+      <div class="mt-4">
+        <label>Model Settings</label>
+        <select v-model="localConfig.modelSettings" @change="updateConfig">
+          <option v-for="model in prismModels" :key="model.id" :value="model">
+            {{ model.name }}
+          </option>
+        </select>
+      </div>
+    </div>
     </div>
   </template>
   
@@ -216,6 +233,19 @@
         },
         { deep: true }
       );
+
+      const prismModels = computed(() => {
+  return Object.entries(props.config?.provider_settings?.models || {})
+    .map(([id, config]) => ({
+      id,
+      name: config.name,
+      ...config
+    }));
+});
+
+const selectedAgent = computed(() => 
+  agents.value.find(a => a.id === localConfig.agentId)
+);
       
       return {
         localConfig,
