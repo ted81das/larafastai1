@@ -1,0 +1,22 @@
+namespace App\Services\Workflow\NodeTypes;
+
+use App\Models\WorkflowExecution;
+use App\Models\WorkflowNode;
+
+interface NodeTypeInterface
+{
+    /**
+     * Execute the node with given input data
+     */
+    public function execute(WorkflowNode $node, array $input, WorkflowExecution $execution): array;
+    
+    /**
+     * Get JSON Schema for node configuration
+     */
+    public function getConfigSchema(): array;
+    
+    /**
+     * Validate node configuration
+     */
+    public function validateConfig(array $config): bool;
+}
