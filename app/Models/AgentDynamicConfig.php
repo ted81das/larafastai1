@@ -228,7 +228,7 @@ class AgentDynamicConfig extends Model
     }
 
 //for prism clients and models
-    public function getModelClient()
+  /*  public function getModelClient()
     {
         if ($this->provider === 'prism') {
             return new PrismAdapter([
@@ -239,6 +239,40 @@ class AgentDynamicConfig extends Model
         }
         
         return parent::getModelClient();
+    }*/
+
+
+     /**
+     * Get the LLM client for this agent configuration
+     */
+    public function getModelClient()
+    {
+        if ($this->provider === 'prism') {
+            // Parse the model string to get provider and model
+            // Format: "provider:model" (e.g. "anthropic:claude-3-sonnet")
+            if (str_contains($this->model, ':')) {
+                [$provider, $model] = explode(':', $this->model, 2);
+                
+                return (new PrismDriver($provider, $model))
+                    ->setUser($this->user)
+                    ->withOptions([
+                        'temperature' => $this->temperature ?? 0.7
+                    ]);
+            }
+            
+            // Fallback for legacy format that doesn't include provider
+            return parent::getModelClient();
+        }
+        
+        return parent::getModelClient();
+    }
+    
+    /**
+     * The user who owns this agent configuration
+     */
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
     }
 
     /**

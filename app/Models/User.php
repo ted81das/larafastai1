@@ -102,4 +102,31 @@ class User extends Authenticatable implements FilamentUser
     {
         return $this->trial_is_used;
     }
+
+    // Inside the User class:
+    
+public function providerApiKeys(): HasMany
+{
+    return $this->hasMany(UserProviderApiKey::class);
+}
+
+/**
+ * Get API key for a specific provider and optionally model
+ */
+public function getProviderApiKey(string $provider, ?string $model = null): ?string
+{
+    $query = $this->providerApiKeys()
+        ->where('provider', $provider);
+        
+    if ($model) {
+        $query->where(function($q) use ($model) {
+            $q->where('model', $model)
+              ->orWhereNull('model'); // Allow generic provider keys
+        });
+    }
+    
+    return $query->latest()->first()?->api_key;
+}
+
+
 }

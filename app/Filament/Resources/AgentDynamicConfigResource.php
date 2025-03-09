@@ -177,9 +177,9 @@ class AgentDynamicConfigResource extends Resource
     public static function getPages(): array
     {
         return [
-            'index' => Pages\ListAgentDynamicConfigs::route('/'),
-            'create' => Pages\CreateAgentDynamicConfig::route('/create'),
-            'edit' => Pages\EditAgentDynamicConfig::route('/{record}/edit'),
+          //  'index' => Pages\ListAgentDynamicConfigs::route('/'),
+          //  'create' => Pages\CreateAgentDynamicConfig::route('/create'),
+          //  'edit' => Pages\EditAgentDynamicConfig::route('/{record}/edit'),
         ];
     }
 }
