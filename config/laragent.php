@@ -50,6 +50,15 @@ return [
                 ],
             ]
         ],
+
+      'llphant_openai' => [
+            'name' => 'Custom OpenAI (LLPhant)',
+            'driver' => \App\Services\LLM\LLPhantOpenAIDriver::class,
+            'models' => [
+                // These will be populated dynamically through the UI
+                // Format: "{endpoint_id}:{model_name}"
+            ]
+        ],  
     ],
 ];
 

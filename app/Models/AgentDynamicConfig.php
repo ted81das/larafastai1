@@ -245,7 +245,7 @@ class AgentDynamicConfig extends Model
      /**
      * Get the LLM client for this agent configuration
      */
-    public function getModelClient()
+    /* public function getModelClient()
     {
         if ($this->provider === 'prism') {
             // Parse the model string to get provider and model
@@ -266,6 +266,40 @@ class AgentDynamicConfig extends Model
         
         return parent::getModelClient();
     }
+*/
+
+
+/**
+     * Get the LLM client for this agent configuration
+     */
+    public function getModelClient()
+    {
+        // Handle Prism provider with provider:model format
+        if ($this->provider === 'prism' && str_contains($this->model, ':')) {
+            [$provider, $model] = explode(':', $this->model, 2);
+            
+            return (new PrismDriver($provider, $model))
+                ->setUser($this->user)
+                ->withOptions([
+                    'temperature' => $this->temperature ?? 0.7
+                ]);
+        }
+        
+        // Handle custom LLPhant OpenAI endpoints
+        if ($this->provider === 'llphant_openai' && str_contains($this->model, ':')) {
+            [$endpoint_id, $model] = explode(':', $this->model, 2);
+            
+            return (new LLPhantOpenAIDriver($endpoint_id, $model))
+                ->setUser($this->user)
+                ->withOptions([
+                    'temperature' => $this->temperature ?? 0.7
+                ]);
+        }
+        
+        // Default handler for other providers
+        return parent::getModelClient();
+    }
+
     
     /**
      * The user who owns this agent configuration
